@@ -22,7 +22,7 @@ from dateutil.parser import parse as parse_date
 
 from django.apps import apps
 from django.contrib.contenttypes.models import ContentType
-from django.db.models import Q
+from django.db.models import Q, OuterRef, Subquery
 from django.utils.translation import ugettext as _
 
 from taiga.base import exceptions as exc
@@ -138,6 +138,17 @@ class FilterBackend(OrderByFilterMixin):
     Default filter backend.
     """
     pass
+
+
+class FilterModelAssignedUsers:
+    def get_assigned_users_filter(self, model, value):
+        assigned_users_ids = model.objects.order_by().filter(
+            assigned_users__in=value, id=OuterRef('pk')).values('pk')
+
+        assigned_user_filter = Q(pk__in=Subquery(assigned_users_ids))
+        assigned_to_filter = Q(assigned_to__in=value)
+
+        return Q(assigned_user_filter | assigned_to_filter)
 
 
 #####################################################################
@@ -420,6 +431,34 @@ class AssignedToFilter(BaseRelatedFieldsFilter):
     filter_name = 'assigned_to'
 
 
+class AssignedUsersFilter(FilterModelAssignedUsers, BaseRelatedFieldsFilter):
+    filter_name = 'assigned_users'
+
+    def _get_queryparams(self, params):
+        param_name = self.param_name or self.filter_name
+        raw_value = params.get(param_name, None)
+
+        if raw_value:
+            value = self._prepare_filter_data(raw_value)
+            UserStoryModel = apps.get_model("userstories", "UserStory")
+
+            if None in value:
+                value.remove(None)
+                assigned_users_ids = UserStoryModel.objects.order_by().filter(
+                    assigned_users__isnull=True,
+                    id=OuterRef('pk')).values('pk')
+
+                assigned_user_filter_none = Q(pk__in=Subquery(assigned_users_ids))
+                assigned_to_filter_none = Q(assigned_to__isnull=True)
+
+                return (self.get_assigned_users_filter(UserStoryModel, value)
+                        | Q(assigned_user_filter_none, assigned_to_filter_none))
+            else:
+                return self.get_assigned_users_filter(UserStoryModel, value)
+
+        return None
+
+
 class StatusesFilter(BaseRelatedFieldsFilter):
     filter_name = 'status'
 
@@ -604,5 +643,27 @@ class RoleFilter(BaseRelatedFieldsFilter):
                 memberships = Membership.objects.filter(query).values_list("user_id", flat=True)
             if memberships:
                 queryset = queryset.filter(assigned_to__in=memberships)
+
+        return FilterBackend.filter_queryset(self, request, queryset, view)
+
+
+class UserStoriesRoleFilter(FilterModelAssignedUsers, BaseRelatedFieldsFilter):
+    filter_name = "role_id"
+    param_name = "role"
+
+    def filter_queryset(self, request, queryset, view):
+        Membership = apps.get_model('projects', 'Membership')
+        query = self._get_queryparams(request.QUERY_PARAMS)
+
+        if query:
+            if isinstance(query, dict):
+                memberships = Membership.objects.filter(**query).values_list("user_id", flat=True)
+            else:
+                memberships = Membership.objects.filter(query).values_list("user_id", flat=True)
+            if memberships:
+                user_story_model = apps.get_model("userstories", "UserStory")
+                queryset = queryset.filter(
+                    self.get_assigned_users_filter(user_story_model, memberships)
+                )
 
         return FilterBackend.filter_queryset(self, request, queryset, view)

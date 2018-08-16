@@ -62,9 +62,10 @@ class UserStoryViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixi
     permission_classes = (permissions.UserStoryPermission,)
     filter_backends = (base_filters.CanViewUsFilterBackend,
                        filters.EpicFilter,
-                       base_filters.RoleFilter,
+                       base_filters.UserStoriesRoleFilter,
                        base_filters.OwnersFilter,
                        base_filters.AssignedToFilter,
+                       base_filters.AssignedUsersFilter,
                        base_filters.StatusesFilter,
                        base_filters.TagsFilter,
                        base_filters.WatchersFilter,
@@ -127,7 +128,6 @@ class UserStoryViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixi
                                include_attachments=include_attachments,
                                include_tasks=include_tasks,
                                epic_id=epic_id)
-
         return qs
 
     def pre_conditions_on_save(self, obj):
@@ -305,6 +305,7 @@ class UserStoryViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixi
         filter_backends = self.get_filter_backends()
         statuses_filter_backends = (f for f in filter_backends if f != base_filters.StatusesFilter)
         assigned_to_filter_backends = (f for f in filter_backends if f != base_filters.AssignedToFilter)
+        assigned_users_filter_backends = (f for f in filter_backends if f != base_filters.AssignedUsersFilter)
         owners_filter_backends = (f for f in filter_backends if f != base_filters.OwnersFilter)
         epics_filter_backends = (f for f in filter_backends if f != filters.EpicFilter)
         roles_filter_backends = (f for f in filter_backends if f != base_filters.RoleFilter)
@@ -313,6 +314,7 @@ class UserStoryViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixi
         querysets = {
             "statuses": self.filter_queryset(queryset, filter_backends=statuses_filter_backends),
             "assigned_to": self.filter_queryset(queryset, filter_backends=assigned_to_filter_backends),
+            "assigned_users": self.filter_queryset(queryset, filter_backends=assigned_users_filter_backends),
             "owners": self.filter_queryset(queryset, filter_backends=owners_filter_backends),
             "tags": self.filter_queryset(queryset),
             "epics": self.filter_queryset(queryset, filter_backends=epics_filter_backends),

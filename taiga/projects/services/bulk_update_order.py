@@ -69,10 +69,10 @@ def apply_order_updates(base_orders: dict, new_orders: dict, *, remove_equal_ori
     removing_keys = [id for id in base_orders if id not in updated_order_ids]
     [base_orders.pop(id, None) for id in removing_keys]
 
-    # Remove elements that are equal to the original
+    # Remove the elements that remains the same
     if remove_equal_original:
-        common_keys = original_orders.keys() & base_orders.keys()
-        [base_orders.pop(id, None) for id in common_keys if base_orders[id] == original_orders[id]]
+        common_keys = base_orders.keys() & original_orders.keys()
+        [base_orders.pop(id, None) for id in common_keys if original_orders[id] == base_orders[id]]
 
 
 def update_projects_order_in_bulk(bulk_data: list, field: str, user):

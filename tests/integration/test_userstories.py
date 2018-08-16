@@ -69,6 +69,44 @@ def test_update_userstories_order_in_bulk():
                                                                 models.UserStory)
 
 
+def test_create_userstory_with_assign_to(client):
+    user = f.UserFactory.create()
+    user_watcher = f.UserFactory.create()
+    project = f.ProjectFactory.create(owner=user)
+    f.MembershipFactory.create(project=project, user=user, is_admin=True)
+    f.MembershipFactory.create(project=project, user=user_watcher,
+                               is_admin=True)
+    url = reverse("userstories-list")
+
+    data = {"subject": "Test user story", "project": project.id,
+            "assigned_to": user.id}
+    client.login(user)
+    response = client.json.post(url, json.dumps(data))
+
+    assert response.status_code == 201
+    assert response.data["assigned_to"] == user.id
+
+
+def test_create_userstory_with_assigned_users(client):
+    user = f.UserFactory.create()
+    user_watcher = f.UserFactory.create()
+    project = f.ProjectFactory.create(owner=user)
+    f.MembershipFactory.create(project=project, user=user, is_admin=True)
+    f.MembershipFactory.create(project=project, user=user_watcher,
+                               is_admin=True)
+    url = reverse("userstories-list")
+
+    data = {"subject": "Test user story", "project": project.id,
+            "assigned_users": [user.id, user_watcher.id]}
+    client.login(user)
+    json_data = json.dumps(data)
+
+    response = client.json.post(url, json_data)
+
+    assert response.status_code == 201
+    assert response.data["assigned_users"] == set([user.id, user_watcher.id])
+
+
 def test_create_userstory_with_watchers(client):
     user = f.UserFactory.create()
     user_watcher = f.UserFactory.create()
@@ -655,6 +693,57 @@ def test_api_filter_by_finish_date(client):
     assert number_of_userstories == 1
     assert response.data[0]["subject"] == userstory_to_finish.subject
 
+
+def test_api_filter_by_assigned_users(client):
+    user = f.UserFactory(is_superuser=True)
+    user2 = f.UserFactory(is_superuser=True)
+
+    userstory = f.create_userstory(owner=user, subject="test 2 users",
+                                   assigned_to=user,
+                                   assigned_users=[user.id, user2.id])
+    f.create_userstory(
+        owner=user, subject="test 1 user", assigned_to=user,
+        assigned_users=[user.id]
+    )
+
+    url = reverse("userstories-list") + "?assigned_users=%s" % (user.id)
+
+    client.login(userstory.owner)
+    response = client.get(url)
+    number_of_userstories = len(response.data)
+
+    assert response.status_code == 200
+    assert number_of_userstories == 2
+
+
+def test_api_filter_by_role(client):
+    project = f.ProjectFactory.create()
+    role1 = f.RoleFactory.create()
+
+    user = f.UserFactory(is_superuser=True)
+    user2 = f.UserFactory(is_superuser=True)
+    f.MembershipFactory.create(user=user2, project=project, role=role1)
+
+    userstory = f.create_userstory(owner=user, subject="test 2 users",
+                                   assigned_to=user,
+                                   assigned_users=[user.id, user2.id],
+                                   project=project)
+    f.create_userstory(
+        owner=user, subject="test 1 user", assigned_to=user,
+        assigned_users=[user.id],
+        project=project
+    )
+
+    url = reverse("userstories-list") + "?role=%s" % (role1.id)
+
+    client.login(userstory.owner)
+    response = client.get(url)
+    number_of_userstories = len(response.data)
+
+    assert response.status_code == 200
+    assert number_of_userstories == 1
+
+
 @pytest.mark.parametrize("field_name", ["estimated_start", "estimated_finish"])
 def test_api_filter_by_milestone__estimated_start_and_end(client, field_name):
     user = f.UserFactory(is_superuser=True)
@@ -710,26 +799,26 @@ def test_api_filters_data(client):
     tag2 = "test2"
     tag3 = "test3"
 
-    # ------------------------------------------------------------------------------
-    # | US    | Status  |  Owner | Assigned To | Tags                | Epic        |
-    # |-------#---------#--------#-------------#---------------------#--------------
-    # | 0     | status3 |  user2 | None        |      tag1           | epic0       |
-    # | 1     | status3 |  user1 | None        |           tag2      | None        |
-    # | 2     | status1 |  user3 | None        |      tag1 tag2      | epic1       |
-    # | 3     | status0 |  user2 | None        |                tag3 | None        |
-    # | 4     | status0 |  user1 | user1       |      tag1 tag2 tag3 | epic0       |
-    # | 5     | status2 |  user3 | user1       |                tag3 | None        |
-    # | 6     | status3 |  user2 | user1       |      tag1 tag2      | epic0 epic2 |
-    # | 7     | status0 |  user1 | user2       |                tag3 | None        |
-    # | 8     | status3 |  user3 | user2       |      tag1           | epic2       |
-    # | 9     | status1 |  user2 | user3       | tag0                | None        |
-    # ------------------------------------------------------------------------------
+    # ----------------------------------------------------------------------------------------------------
+    # | US    | Status  |  Owner | Assigned To | Assigned Users      | Tags                | Epic        |
+    # |-------#---------#--------#-------------#---------------------#---------------------#--------------
+    # | 0     | status3 |  user2 | None        | None                |      tag1           | epic0       |
+    # | 1     | status3 |  user1 | None        | user1               |           tag2      | None        |
+    # | 2     | status1 |  user3 | None        | None                |      tag1 tag2      | epic1       |
+    # | 3     | status0 |  user2 | None        | None                |                tag3 | None        |
+    # | 4     | status0 |  user1 | user1       | None                |      tag1 tag2 tag3 | epic0       |
+    # | 5     | status2 |  user3 | user1       | None                |                tag3 | None        |
+    # | 6     | status3 |  user2 | user1       | None                |      tag1 tag2      | epic0 epic2 |
+    # | 7     | status0 |  user1 | user2       | None                |                tag3 | None        |
+    # | 8     | status3 |  user3 | user2       | None                |      tag1           | epic2       |
+    # | 9     | status1 |  user2 | user3       | user1               | tag0                | None        |
+    # ----------------------------------------------------------------------------------------------------
 
     us0 = f.UserStoryFactory.create(project=project, owner=user2, assigned_to=None,
                               status=status3, tags=[tag1])
     f.RelatedUserStory.create(user_story=us0, epic=epic0)
     us1 = f.UserStoryFactory.create(project=project, owner=user1, assigned_to=None,
-                              status=status3, tags=[tag2])
+                              status=status3, tags=[tag2], assigned_users=[user1])
     us2 = f.UserStoryFactory.create(project=project, owner=user3, assigned_to=None,
                               status=status1, tags=[tag1, tag2])
     f.RelatedUserStory.create(user_story=us2, epic=epic1)
@@ -750,7 +839,7 @@ def test_api_filters_data(client):
                               status=status3, tags=[tag1])
     f.RelatedUserStory.create(user_story=us8, epic=epic2)
     us9 = f.UserStoryFactory.create(project=project, owner=user2, assigned_to=user3,
-                              status=status1, tags=[tag0])
+                              status=status1, tags=[tag0], assigned_users=[user1])
 
     url = reverse("userstories-filters-data") + "?project={}".format(project.id)
 
@@ -768,6 +857,9 @@ def test_api_filters_data(client):
     assert next(filter(lambda i: i['id'] == user1.id, response.data["assigned_to"]))["count"] == 3
     assert next(filter(lambda i: i['id'] == user2.id, response.data["assigned_to"]))["count"] == 2
     assert next(filter(lambda i: i['id'] == user3.id, response.data["assigned_to"]))["count"] == 1
+
+    assert next(filter(lambda i: i['id'] == user1.id, response.data["assigned_users"]))["count"] == 5
+    assert next(filter(lambda i: i['id'] == user2.id, response.data["assigned_users"]))["count"] == 2
 
     assert next(filter(lambda i: i['id'] == status0.id, response.data["statuses"]))["count"] == 3
     assert next(filter(lambda i: i['id'] == status1.id, response.data["statuses"]))["count"] == 2
@@ -869,6 +961,138 @@ def test_api_filters_data(client):
     assert next(filter(lambda i: i['id'] == epic2.id, response.data["epics"]))["count"] == 2
 
 
+def test_api_filters_data_with_assigned_users(client):
+    project = f.ProjectFactory.create()
+    user1 = f.UserFactory.create(is_superuser=True)
+    f.MembershipFactory.create(user=user1, project=project)
+    user2 = f.UserFactory.create(is_superuser=True)
+    f.MembershipFactory.create(user=user2, project=project)
+    user3 = f.UserFactory.create(is_superuser=True)
+    f.MembershipFactory.create(user=user3, project=project)
+
+    status0 = f.UserStoryStatusFactory.create(project=project)
+    status1 = f.UserStoryStatusFactory.create(project=project)
+    status2 = f.UserStoryStatusFactory.create(project=project)
+    status3 = f.UserStoryStatusFactory.create(project=project)
+
+    # -----------------------------------------------------------
+    # | US    | Status  |  Owner | Assigned To | Assigned Users |
+    # |-------#---------#--------#-------------#-----------------
+    # | 0     | status3 |  user2 | user2       | user2, user3   |
+    # | 1     | status3 |  user1 | None        | None           |
+    # | 2     | status1 |  user3 | None        | None           |
+    # | 3     | status0 |  user2 | None        | None           |
+    # | 4     | status0 |  user1 | user1       | user1          |
+    # -----------------------------------------------------------
+
+    us0 = f.UserStoryFactory.create(project=project, owner=user2,
+                                    assigned_to=user2,
+                                    assigned_users=[user2, user3],
+                                    status=status3)
+    f.RelatedUserStory.create(user_story=us0)
+    us1 = f.UserStoryFactory.create(project=project, owner=user1,
+                                    assigned_to=None,
+                                    status=status3, )
+    us2 = f.UserStoryFactory.create(project=project, owner=user3,
+                                    assigned_to=None,
+                                    status=status1)
+    f.RelatedUserStory.create(user_story=us2)
+    us3 = f.UserStoryFactory.create(project=project, owner=user2,
+                                    assigned_to=None,
+                                    status=status0)
+    us4 = f.UserStoryFactory.create(project=project, owner=user1,
+                                    assigned_to=user1,
+                                    assigned_users=[user1],
+                                    status=status0)
+
+    url = reverse("userstories-filters-data") + "?project={}".format(project.id)
+
+    client.login(user1)
+
+    # No filter
+    response = client.get(url)
+    assert response.status_code == 200
+
+    assert next(filter(lambda i: i['id'] == user1.id, response.data["owners"]))["count"] == 2
+    assert next(filter(lambda i: i['id'] == user2.id, response.data["owners"]))["count"] == 2
+    assert next(filter(lambda i: i['id'] == user3.id, response.data["owners"]))["count"] == 1
+
+    assert next(filter(lambda i: i['id'] is None, response.data["assigned_to"]))["count"] == 3
+    assert next(filter(lambda i: i['id'] == user1.id, response.data["assigned_to"]))["count"] == 1
+    assert next(filter(lambda i: i['id'] == user2.id, response.data["assigned_to"]))["count"] == 1
+    assert next(filter(lambda i: i['id'] == user3.id, response.data["assigned_to"]))["count"] == 0
+
+    assert next(filter(lambda i: i['id'] == status0.id, response.data["statuses"]))["count"] == 2
+    assert next(filter(lambda i: i['id'] == status1.id, response.data["statuses"]))["count"] == 1
+    assert next(filter(lambda i: i['id'] == status2.id, response.data["statuses"]))["count"] == 0
+    assert next(filter(lambda i: i['id'] == status3.id, response.data["statuses"]))["count"] == 2
+
+    assert next(filter(lambda i: i['id'] == user1.id,
+                       response.data["assigned_users"]))["count"] == 1
+    assert next(filter(lambda i: i['id'] == user2.id,
+                       response.data["assigned_users"]))["count"] == 1
+    assert next(filter(lambda i: i['id'] == user3.id,
+                       response.data["assigned_users"]))["count"] == 1
+
+
+def test_api_filters_data_roles_with_assigned_users(client):
+    project = f.ProjectFactory.create()
+
+    role1 = f.RoleFactory.create(project=project)
+    role2 = f.RoleFactory.create(project=project)
+
+    user1 = f.UserFactory.create(is_superuser=True)
+    f.MembershipFactory.create(user=user1, project=project, role=role1)
+    user2 = f.UserFactory.create(is_superuser=True)
+    f.MembershipFactory.create(user=user2, project=project, role=role2)
+    user3 = f.UserFactory.create(is_superuser=True)
+    f.MembershipFactory.create(user=user3, project=project, role=role1)
+
+
+    # ----------------------------------------------------------------
+    # | US    |  Owner | Assigned To | Assigned Users | Role         |
+    # |-------#--------#-------------#----------------#---------------
+    # | 0     |  user2 | user2       | user2, user3   | role2, role1 |
+    # | 1     |  user1 | None        | None           | None         |
+    # | 2     |  user1 | user1       | user1          | role1        |
+    # ----------------------------------------------------------------
+
+    us0 = f.UserStoryFactory.create(project=project, owner=user2,
+                                    assigned_to=user2,
+                                    assigned_users=[user2, user3],)
+    f.RelatedUserStory.create(user_story=us0)
+    us1 = f.UserStoryFactory.create(project=project, owner=user1,
+                                    assigned_to=None)
+    us2 = f.UserStoryFactory.create(project=project, owner=user1,
+                                    assigned_to=user1,
+                                    assigned_users=[user1],)
+
+    url = reverse("userstories-filters-data") + "?project={}".format(project.id)
+
+    client.login(user1)
+
+    # No filter
+    response = client.get(url)
+    assert response.status_code == 200
+
+    assert next(filter(lambda i: i['id'] == user1.id, response.data["owners"]))["count"] == 2
+    assert next(filter(lambda i: i['id'] == user2.id, response.data["owners"]))["count"] == 1
+
+    assert next(filter(lambda i: i['id'] is None, response.data["assigned_to"]))["count"] == 1
+    assert next(filter(lambda i: i['id'] == user1.id, response.data["assigned_to"]))["count"] == 1
+    assert next(filter(lambda i: i['id'] == user2.id, response.data["assigned_to"]))["count"] == 1
+
+    assert next(filter(lambda i: i['id'] == user1.id,
+                       response.data["assigned_users"]))["count"] == 1
+    assert next(filter(lambda i: i['id'] == user2.id,
+                       response.data["assigned_users"]))["count"] == 1
+
+    assert next(filter(lambda i: i['id'] == role1.id,
+                       response.data["roles"]))["count"] == 2
+    assert next(filter(lambda i: i['id'] == role2.id,
+                       response.data["roles"]))["count"] == 1
+
+
 def test_get_invalid_csv(client):
     url = reverse("userstories-csv")
 
@@ -883,13 +1107,16 @@ def test_get_valid_csv(client):
     url = reverse("userstories-csv")
     project = f.ProjectFactory.create(userstories_csv_uuid=uuid.uuid4().hex)
 
-    response = client.get("{}?uuid={}".format(url, project.userstories_csv_uuid))
+    response = client.get(
+        "{}?uuid={}".format(url, project.userstories_csv_uuid))
     assert response.status_code == 200
 
 
 def test_custom_fields_csv_generation():
     project = f.ProjectFactory.create(userstories_csv_uuid=uuid.uuid4().hex)
-    attr = f.UserStoryCustomAttributeFactory.create(project=project, name="attr1", description="desc")
+    attr = f.UserStoryCustomAttributeFactory.create(project=project,
+                                                    name="attr1",
+                                                    description="desc")
     us = f.UserStoryFactory.create(project=project)
     attr_values = us.custom_attributes_values
     attr_values.attributes_values = {str(attr.id): "val1"}
@@ -899,17 +1126,20 @@ def test_custom_fields_csv_generation():
     data.seek(0)
     reader = csv.reader(data)
     row = next(reader)
-    assert row[28] == attr.name
+
+    assert row.pop() == attr.name
     row = next(reader)
-    assert row[28] == "val1"
+    assert row.pop() == "val1"
 
 
 def test_update_userstory_respecting_watchers(client):
     watching_user = f.create_user()
     project = f.ProjectFactory.create()
-    us = f.UserStoryFactory.create(project=project, status__project=project, milestone__project=project)
+    us = f.UserStoryFactory.create(project=project, status__project=project,
+                                   milestone__project=project)
     us.add_watcher(watching_user)
-    f.MembershipFactory.create(project=us.project, user=us.owner, is_admin=True)
+    f.MembershipFactory.create(project=us.project, user=us.owner,
+                               is_admin=True)
     f.MembershipFactory.create(project=us.project, user=watching_user)
 
     client.login(user=us.owner)
@@ -925,8 +1155,10 @@ def test_update_userstory_respecting_watchers(client):
 def test_update_userstory_update_watchers(client):
     watching_user = f.create_user()
     project = f.ProjectFactory.create()
-    us = f.UserStoryFactory.create(project=project, status__project=project, milestone__project=project)
-    f.MembershipFactory.create(project=us.project, user=us.owner, is_admin=True)
+    us = f.UserStoryFactory.create(project=project, status__project=project,
+                                   milestone__project=project)
+    f.MembershipFactory.create(project=us.project, user=us.owner,
+                               is_admin=True)
     f.MembershipFactory.create(project=us.project, user=watching_user)
 
     client.login(user=us.owner)
@@ -943,9 +1175,11 @@ def test_update_userstory_update_watchers(client):
 def test_update_userstory_remove_watchers(client):
     watching_user = f.create_user()
     project = f.ProjectFactory.create()
-    us = f.UserStoryFactory.create(project=project, status__project=project, milestone__project=project)
+    us = f.UserStoryFactory.create(project=project, status__project=project,
+                                   milestone__project=project)
     us.add_watcher(watching_user)
-    f.MembershipFactory.create(project=us.project, user=us.owner, is_admin=True)
+    f.MembershipFactory.create(project=us.project, user=us.owner,
+                               is_admin=True)
     f.MembershipFactory.create(project=us.project, user=watching_user)
 
     client.login(user=us.owner)
@@ -961,8 +1195,10 @@ def test_update_userstory_remove_watchers(client):
 
 def test_update_userstory_update_tribe_gig(client):
     project = f.ProjectFactory.create()
-    us = f.UserStoryFactory.create(project=project, status__project=project, milestone__project=project)
-    f.MembershipFactory.create(project=us.project, user=us.owner, is_admin=True)
+    us = f.UserStoryFactory.create(project=project, status__project=project,
+                                   milestone__project=project)
+    f.MembershipFactory.create(project=us.project, user=us.owner,
+                               is_admin=True)
 
     url = reverse("userstories-detail", kwargs={"pk": us.pk})
     data = {
